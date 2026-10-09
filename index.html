@@ -112,8 +112,8 @@ button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 </div></section>
 <div class="tabs"><button class="tab active" data-tab="master">MASTER WILAYAH</button><button class="tab" data-tab="charge">CHARGE TRANSPORT</button><button class="tab" data-tab="contacts">KONTAK PIC</button></div>
 <div id="masterView"><div class="grid2"><section class="panel"><div class="section-title">Coverage per Pool</div><div class="chart" id="poolChart"></div></section><section class="panel"><div class="section-title">Coverage per Provinsi</div><div class="listchart" id="provChart"></div></section></div><section class="panel"><div class="section-title">Hasil Coverage <span id="resultCount" class="badge"></span></div><div class="tablewrap" id="masterTable"></div><div class="pager" id="masterPager"></div></section></div>
-<div id="chargeView" class="hidden"><div class="grid2"><section class="panel"><div class="section-title">Charge Transport per Pool</div><div class="listchart" id="chargePoolChart"></div></section><section class="panel"><div class="section-title">Ringkasan Biaya</div><div id="chargeSummary"></div></section></div><section class="panel"><div class="section-title">Detail Charge Transport <span id="chargeCount" class="badge"></span></div><div class="tablewrap" id="chargeTable"></div><div class="pager" id="chargePager"></div></section></div>
-<div id="contactsView" class="hidden"><section class="panel"><div class="section-title">Kontak PIC per Pool</div><div class="listchart" id="contactPoolChart"></div></section><section class="panel"><div class="section-title">Daftar Kontak PIC <span id="contactCount" class="badge"></span></div><div class="tablewrap" id="contactTable"></div><div class="pager" id="contactPager"></div></section></div>
+<div id="chargeView" class="hidden"><div class="grid2"><section class="panel"><div class="section-title">Charge Transport per Pool</div><div class="listchart" id="chargePoolChart"></div></section><section class="panel"><div class="section-title">Ringkasan Biaya</div><div id="chargeSummary"></div></section></div><section class="panel"><div class="section-title">Detail Charge Transport <span id="chargeCount" class="badge"></span></div><div style="display:flex;gap:8px;margin-bottom:10px"><input id="chargeSearch" type="search" placeholder="🔎 Cari pool, area, store..." style="flex:1;height:40px;padding:0 12px;border:1px solid #d5dce5;border-radius:8px;font-size:14px"></div><div class="tablewrap" id="chargeTable"></div><div class="pager" id="chargePager"></div></section></div>
+<div id="contactsView" class="hidden"><section class="panel"><div class="section-title">📞 DAFTAR KONTAK PIC <span id="contactCount" class="badge"></span></div><div style="font-size:12px;color:#6d7d91;margin-bottom:10px">Data diambil langsung dari sheet KONTAK PIC.</div><div style="display:flex;gap:8px;margin-bottom:10px"><input id="contactSearch" type="search" placeholder="🔎 Cari pool, nama PIC, area, nomor HP..." style="flex:1;height:40px;padding:0 12px;border:1px solid #d5dce5;border-radius:8px;font-size:14px"></div><div class="tablewrap" id="contactTable"></div><div class="pager" id="contactPager"></div></section></div>
 <div class="panel"><div class="section-title">☁️ Database Live Google Sheets</div><div id="uploadStatus" class="notice">Menghubungkan ke Google Sheets…</div><div style="margin-top:8px;font-size:11px;color:#6d7d91">Dashboard membaca sheet <b>MASTER WILAYAH</b>, <b>CHARGE TRANSPORT</b>, dan <b>KONTAK PIC</b> langsung dari Google Sheets. Data diperbarui otomatis setiap 60 detik. Jika koneksi sesaat gagal, dashboard akan mencoba ulang otomatis.</div></div>
 <div class="footer">Coverage CommServ – Pool Nasional • LIVE Google Sheets • Auto-refresh 60 detik</div>
 </main></div>
@@ -123,21 +123,21 @@ function cloneData(obj){
   try{return JSON.parse(JSON.stringify(obj));}
   catch(e){return obj;}
 }
-let state={data:cloneData(INITIAL),tab:'master',masterPage:1,chargePage:1,contactPage:1,filteredMaster:[],filteredCharge:[],filteredContacts:[]};
+let state={data:cloneData(INITIAL),tab:'master',masterPage:1,chargePage:1,contactPage:1,filteredMaster:[],filteredCharge:[],filteredContacts:[],chargeSearch:'',contactSearch:''};
 
 const LIVE_SHEET_ID='1DzlJpdf84vw7TJubSECqrR4ywp9PTGOY';
 const LIVE_HOSTED=(location.protocol==='https:'||location.protocol==='http:');
 const LIVE_SHEETS={master:'MASTER WILAYAH',charge:'CHARGE TRANSPORT',contacts:'KONTAK PIC'};
-const LIVE_REFRESH_MS=60000;
+const LIVE_REFRESH_MS=300000; // Auto-refresh setiap 5 menit
 let liveLoading=false;
-function gvizUrl(sheet, cb){
+function gvizUrl(sheet, cb, headers=1, query='select *'){
   return 'https://docs.google.com/spreadsheets/d/'+LIVE_SHEET_ID+'/gviz/tq?sheet='+
     encodeURIComponent(sheet)+
     '&tqx='+encodeURIComponent('responseHandler:'+cb)+
-    '&headers=0&tq='+encodeURIComponent('select *')+
+    '&headers='+headers+'&tq='+encodeURIComponent(query)+
     '&cachebust='+Date.now();
 }
-function fetchSheetRows(sheet, attempt=1){
+function fetchSheetRows(sheet, attempt=1, headers=1, query='select *'){
   return new Promise((resolve,reject)=>{
     const cb='__gs_cb_'+Date.now()+'_'+Math.random().toString(36).slice(2);
     let done=false;
@@ -177,12 +177,12 @@ function fetchSheetRows(sheet, attempt=1){
     };
 
     script.onerror=()=>finish(new Error('Gagal terhubung ke Google Sheets untuk '+sheet));
-    script.src=gvizUrl(sheet,cb);
+    script.src=gvizUrl(sheet,cb,headers,query);
     document.head.appendChild(script);
   }).catch(async err=>{
     if(attempt<3){
       await new Promise(r=>setTimeout(r,1200*attempt));
-      return fetchSheetRows(sheet,attempt+1);
+      return fetchSheetRows(sheet,attempt+1,headers,query);
     }
     throw err;
   });
@@ -190,6 +190,7 @@ function fetchSheetRows(sheet, attempt=1){
 
 async function loadLiveData(){
   if(liveLoading)return;
+  window.__lastLiveFetch=Date.now();
   liveLoading=true;
   const status=$('uploadStatus');
   status.innerHTML='<b>● LIVE</b> Mengambil data terbaru dari Google Sheets…';
@@ -201,7 +202,8 @@ async function loadLiveData(){
     if(!master.length) throw new Error('MASTER WILAYAH kosong atau format header tidak terbaca.');
 
     const cr=await fetchSheetRows(LIVE_SHEETS.charge);
-    const rr=await fetchSheetRows(LIVE_SHEETS.contacts);
+    // KONTAK PIC memiliki satu baris kosong di paling atas, jadi header harus ikut dibaca sebagai data.
+    const rr=await fetchSheetRows(LIVE_SHEETS.contacts,1,0,'select A,B,C,D,E,F');
 
     const data={
       master:master,
@@ -311,18 +313,127 @@ function pager(id,page,total,setter,count){$(id).innerHTML=`<span>Menampilkan ha
 window.goMaster=p=>{state.masterPage=p;renderMasterTable()};window.goCharge=p=>{state.chargePage=p;renderChargeTable()};window.goContacts=p=>{state.contactPage=p;renderContactTable()};
 function renderMasterTable(){let headers=['ID','PROVINSI','KOTA','KECAMATAN','KELURAHAN','KODE POS','INSTALLER POOL','PERDIN','COMMSER','CNC','IAC'];let rows=state.filteredMaster.map(x=>[x.ID,x.PROVINSI,x.KOTA,x.KECAMATAN,x.KELURAHAN,x.KODE_POS,x.INSTALLER_POOL,x.PERDIN_YES?'YES':(x.PERDIN_NO?'NO':''),x.COMMSER_AC?'✓':'',x.COMMSER_CNC?'✓':'',x.COMMSER_IAC?'✓':'']);let p=paginate(rows,state.masterPage);$('masterTable').innerHTML=table(headers,p.items);$('resultCount').textContent=fmt(rows.length)+' data';pager('masterPager',p.page,p.total,'goMaster',rows.length)}
 function renderCharge(){let c=counts(state.data.charge,'POOL').slice(0,20),mx=c[0]?.[1]||1;$('chargePoolChart').innerHTML=c.map(([k,v])=>`<div class="rowbar"><div title="${esc(k)}">${esc(k)}</div><div class="track"><div class="fill" style="width:${Math.round(v/mx*100)}%"></div></div><b>${fmt(v)}</b></div>`).join('');let vals=state.data.charge.map(x=>Number(x.TOTAL_BIAYA)).filter(Number.isFinite);let avg=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;let max=vals.length?Math.max(...vals):0;$('chargeSummary').innerHTML=`<div class="kpi" style="box-shadow:none;border:0;padding:8px 0"><div class="l">Total baris</div><div class="v">${fmt(state.data.charge.length)}</div></div><div class="kpi" style="box-shadow:none;border:0;padding:8px 0"><div class="l">Rata-rata biaya</div><div class="v">Rp ${fmt(Math.round(avg))}</div></div><div class="kpi" style="box-shadow:none;border:0;padding:8px 0"><div class="l">Biaya tertinggi</div><div class="v">Rp ${fmt(max)}</div></div>`;renderChargeTable()}
-function renderChargeTable(){let h=['POOL','STORE TERDEKAT','AREA','KM','TOTAL BIAYA','MIN. TRX UNTUK FREE','BIAYA TOL'];let rows=state.data.charge.map(x=>[x.POOL,x.STORE_TERDEKAT,x.AREA,x.KM,x.TOTAL_BIAYA,x.MIN_TRX_FREE,x.BIAYA_TOL]);let p=paginate(rows,state.chargePage);$('chargeTable').innerHTML=table(h,p.items.map(r=>r.map((v,i)=>i>=4&&v!==''?'Rp '+fmt(v):v)));$('chargeCount').textContent=fmt(rows.length)+' data';pager('chargePager',p.page,p.total,'goCharge',rows.length)}
-function renderContacts(){let c=counts(state.data.contacts,'NAMA_POOL').slice(0,20),mx=c[0]?.[1]||1;$('contactPoolChart').innerHTML=c.map(([k,v])=>`<div class="rowbar"><div>${esc(k)}</div><div class="track"><div class="fill" style="width:${Math.round(v/mx*100)}%"></div></div><b>${fmt(v)}</b></div>`).join('');renderContactTable()}
-function renderContactTable(){let h=['NO','AREA KODE','NAMA AREA','NAMA POOL','NAMA LEADER','NOMER HP'];let rows=state.data.contacts.map(x=>[x.NO,x.AREA_KODE,x.NAMA_AREA,x.NAMA_POOL,x.NAMA_LEADER,x.NOMER_HP]);let p=paginate(rows,state.contactPage);$('contactTable').innerHTML=table(h,p.items);$('contactCount').textContent=fmt(rows.length)+' data';pager('contactPager',p.page,p.total,'goContacts',rows.length)}
+function renderChargeTable(){let h=['POOL','STORE TERDEKAT','AREA','KM','TOTAL BIAYA','MIN. TRX UNTUK FREE','BIAYA TOL'];let q=String(state.chargeSearch||'').toLowerCase().trim();let rows=state.data.charge.filter(x=>!q||[x.POOL,x.STORE_TERDEKAT,x.AREA,x.KM,x.TOTAL_BIAYA,x.MIN_TRX_FREE,x.BIAYA_TOL].join(' ').toLowerCase().includes(q)).map(x=>[x.POOL,x.STORE_TERDEKAT,x.AREA,x.KM,x.TOTAL_BIAYA,x.MIN_TRX_FREE,x.BIAYA_TOL]);let p=paginate(rows,state.chargePage);$('chargeTable').innerHTML=table(h,p.items.map(r=>r.map((v,i)=>i>=4&&v!==''?'Rp '+fmt(v):v)));$('chargeCount').textContent=fmt(rows.length)+' data';pager('chargePager',p.page,p.total,'goCharge',rows.length)}
+function renderContacts(){renderContactTable()}
+function renderContactTable(){let h=['NO','AREA KODE','NAMA AREA','NAMA POOL','NAMA LEADER','NOMER HP'];let q=String(state.contactSearch||'').toLowerCase().trim();let rows=state.data.contacts.filter(x=>!q||[x.NO,x.AREA_KODE,x.NAMA_AREA,x.NAMA_POOL,x.NAMA_LEADER,x.NOMER_HP].join(' ').toLowerCase().includes(q)).map(x=>[x.NO,x.AREA_KODE,x.NAMA_AREA,x.NAMA_POOL,x.NAMA_LEADER,x.NOMER_HP]);let p=paginate(rows,state.contactPage);$('contactTable').innerHTML=table(h,p.items);$('contactCount').textContent=fmt(rows.length)+' data';pager('contactPager',p.page,p.total,'goContacts',rows.length)}
 function renderAll(){ $('kpis').innerHTML=kpis();renderCharts();renderMasterTable();renderCharge();renderContacts();switchTab(state.tab)}
 function switchTab(t){state.tab=t;document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));$('masterView').classList.toggle('hidden',t!=='master');$('chargeView').classList.toggle('hidden',t!=='charge');$('contactsView').classList.toggle('hidden',t!=='contacts')}
 function exportCSV(){let rows=state.filteredMaster,headers=['ID','PROVINSI','KOTA','KECAMATAN','KELURAHAN','KODE POS','INSTALLER POOL','PERDIN_YES','PERDIN_NO','COMMSER_AC','COMMSER_CNC','COMMSER_IAC'];let csv=[headers,...rows.map(x=>headers.map(h=>x[h]||''))].map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download='hasil_coverage.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}
 async function loadXLSX(){if(window.XLSX)return window.XLSX;return new Promise((resolve,reject)=>{let s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=()=>resolve(window.XLSX);s.onerror=()=>reject(new Error('Library XLSX gagal dimuat. Pastikan koneksi internet aktif.'));document.head.appendChild(s)})}
 function normCell(v){return String(v??'').trim()}
 function findHeader(rows, required){for(let i=0;i<rows.length;i++){let a=(rows[i]||[]).map(v=>normCell(v).toUpperCase());let ok=required.every(k=>a.includes(k));if(ok)return {i,map:Object.fromEntries(a.map((v,j)=>[v,j]))}}return {i:-1,map:{}}}
-function rowsToMaster(rows){let h=findHeader(rows,['ID','KOTA','KECAMATAN','PROVINSI']);let start=h.i>=0?h.i+1:0;let m=h.map;let out=[];for(let i=start;i<rows.length;i++){let r=rows[i]||[];if(!r.some(v=>normCell(v)))continue;let val=k=>m[k]!==undefined?r[m[k]]??'':'';let obj={ID:val('ID'),KOTA:val('KOTA'),KECAMATAN:val('KECAMATAN'),KELURAHAN:val('KELURAHAN'),KODE_POS:val('KODE_POS'),PROVINSI:val('PROVINSI'),INSTALLER_POOL:val('INSTALLER POOL'),PERDIN_YES:val('PERDIN_YES'),PERDIN_NO:val('PERDIN_NO'),COMMSER_AC:val('COMMSER_AC'),COMMSER_CNC:val('COMMSER_CNC'),COMMSER_IAC:val('COMMSER_IAC')};if(!obj.ID&&!obj.KOTA&&!obj.KECAMATAN)continue;out.push(obj)}return out}
-function rowsToCharge(rows){let h=findHeader(rows,['POOL']);let start=h.i>=0?h.i+1:0;let m=h.map,out=[],last='';for(let i=start;i<rows.length;i++){let r=rows[i]||[];if(!r.some(v=>normCell(v)))continue;let get=(name,fallback)=>m[name]!==undefined?(r[m[name]]??''):fallback;let pool=get('POOL','')||last;if(pool)last=pool;out.push({POOL:pool,STORE_TERDEKAT:get('STORE TERDEKAT',r[1]??''),AREA:get('AREA',r[2]??''),KM:get('KM',r[3]??''),TOTAL_BIAYA:get('TOTAL BIAYA',r[4]??''),MIN_TRX_FREE:get('MIN TRX FREE',r[5]??''),BIAYA_TOL:get('BIAYA TOL',r[6]??'')})}return out.filter(x=>Object.values(x).some(v=>normCell(v)))}
-function rowsToContacts(rows){let h=findHeader(rows,['AREA_KODE','NAMA_AREA','NAMA_POOL']);let start=h.i>=0?h.i+1:0;let m=h.map,out=[],last={AREA_KODE:'',NAMA_AREA:'',NAMA_POOL:''};for(let i=start;i<rows.length;i++){let r=rows[i]||[];if(!r.some(v=>normCell(v)))continue;let get=(name,idx)=>m[name]!==undefined?(r[m[name]]??''):(r[idx]??'');let d={NO:get('NO',0),AREA_KODE:get('AREA_KODE',1),NAMA_AREA:get('NAMA_AREA',2),NAMA_POOL:get('NAMA_POOL',3),NAMA_LEADER:get('NAMA_LEADER',4),NOMER_HP:get('NOMER_HP',5)};['AREA_KODE','NAMA_AREA','NAMA_POOL'].forEach(k=>{if(normCell(d[k])==='')d[k]=last[k];else last[k]=d[k]});if(normCell(d.NAMA_POOL)||normCell(d.NAMA_LEADER)||normCell(d.NOMER_HP))out.push(d)}return out}
+function headerKey(s){
+  return normCell(s).toUpperCase()
+    .replace(/\s+/g,' ')
+    .replace(/[.\-]/g,'')
+    .trim();
+}
+function rowsToMaster(rows){
+  // MASTER WILAYAH memakai 2 baris header:
+  // baris 1: PERDIN / COMMSER
+  // baris 2: YES / NO / AC / CNC / IAC.
+  // Parser ini mempertahankan ketiga status CommServ agar ceklis CNC/IAC tidak hilang.
+  let r0=rows[0]||[], r1=rows[1]||[];
+  let base=r0.map(headerKey), sub=r1.map(headerKey);
+  let idx={};
+  const find=(name)=>base.findIndex(x=>x===name);
+  idx.ID=find('ID'); idx.KOTA=find('KOTA'); idx.KECAMATAN=find('KECAMATAN');
+  idx.KELURAHAN=find('KELURAHAN'); idx.KODE_POS=find('KODE_POS');
+  idx.PROVINSI=find('PROVINSI'); idx.POOL=find('INSTALLER POOL');
+  idx.PERDIN=find('PERDIN'); idx.COMMSER=find('COMMSER');
+  // Header parent seperti COMMSER/PERDIN hanya muncul di kolom pertama
+  // dari kelompoknya (sel berikutnya kosong karena merge). Karena itu,
+  // jangan mensyaratkan base[i] selalu terisi pada setiap subkolom.
+  const parentAt=parent=>base.findIndex(x=>x===parent);
+  const perdinAt=parentAt('PERDIN');
+  const commserAt=parentAt('COMMSER');
+  const nextSub=(start,label)=>{
+    if(start<0) return -1;
+    for(let i=start;i<Math.min(start+6,Math.max(base.length,sub.length));i++){
+      if(sub[i]===label) return i;
+    }
+    return -1;
+  };
+  idx.PY=nextSub(perdinAt,'YES'); idx.PN=nextSub(perdinAt,'NO');
+  idx.CAC=nextSub(commserAt,'AC'); idx.CNC=nextSub(commserAt,'CNC'); idx.IAC=nextSub(commserAt,'IAC');
+
+  // Fallback untuk variasi header bila sheet sudah diratakan menjadi nama lengkap.
+  const aliases={
+    PY:['PERDIN_YES','PERDIN YES'], PN:['PERDIN_NO','PERDIN NO'],
+    CAC:['COMMSER_AC','COMMSER AC'], CNC:['COMMSER_CNC','COMMSER CNC'],
+    IAC:['COMMSER_IAC','COMMSER IAC']
+  };
+  Object.entries(aliases).forEach(([k,arr])=>{
+    if(idx[k]<0){
+      for(let i=0;i<base.length;i++){
+        const z=base[i]+' '+sub[i];
+        if(arr.some(a=>headerKey(a)===headerKey(z)||headerKey(a)===base[i])){idx[k]=i;break}
+      }
+    }
+  });
+
+  const get=(r,i)=>i>=0 ? (r[i]??'') : '';
+  const out=[];
+  for(let i=2;i<rows.length;i++){
+    const r=rows[i]||[];
+    if(!r.some(v=>normCell(v))) continue;
+    const obj={
+      ID:get(r,idx.ID), KOTA:get(r,idx.KOTA), KECAMATAN:get(r,idx.KECAMATAN),
+      KELURAHAN:get(r,idx.KELURAHAN), KODE_POS:(()=>{const v=get(r,idx.KODE_POS); const s=normCell(v); return /^\d{1,4}$/.test(s)?s.padStart(5,'0'):s})(),
+      PROVINSI:get(r,idx.PROVINSI), INSTALLER_POOL:get(r,idx.POOL),
+      PERDIN_YES:get(r,idx.PY), PERDIN_NO:get(r,idx.PN),
+      COMMSER_AC:get(r,idx.CAC), COMMSER_CNC:get(r,idx.CNC), COMMSER_IAC:get(r,idx.IAC)
+    };
+    if(!obj.ID&&!obj.KOTA&&!obj.KECAMATAN) continue;
+    out.push(obj);
+  }
+  return out;
+}
+function rowsToCharge(rows){
+  let h=findHeader(rows,['POOL']);let start=h.i>=0?h.i+1:0;let m=h.map,out=[],last='';
+  for(let i=start;i<rows.length;i++){let r=rows[i]||[];if(!r.some(v=>normCell(v)))continue;let get=(name,fallback)=>m[name]!==undefined?(r[m[name]]??''):fallback;let pool=get('POOL','')||last;if(pool)last=pool;out.push({POOL:pool,STORE_TERDEKAT:get('STORE TERDEKAT',r[1]??''),AREA:get('AREA',r[2]??''),KM:get('KM',r[3]??''),TOTAL_BIAYA:get('TOTAL BIAYA',r[4]??''),MIN_TRX_FREE:get('MIN TRX FREE',r[5]??''),BIAYA_TOL:get('BIAYA TOL',r[6]??'')})}
+  return out.filter(x=>Object.values(x).some(v=>normCell(v)));
+}
+function rowsToContacts(rows){
+  // Versi sederhana: Google Sheets dibaca langsung kolom A:F.
+  // Cari baris header berdasarkan nama kolom, lalu semua baris di bawahnya dianggap data PIC.
+  let header=-1;
+  for(let i=0;i<rows.length;i++){
+    const a=(rows[i]||[]).map(v=>headerKey(v));
+    if(a.includes('NAMA POOL') && (a.includes('NAMA LEADER') || a.includes('NOMER HP'))){
+      header=i; break;
+    }
+  }
+  if(header<0) return [];
+
+  const out=[];
+  let lastArea='', lastNamaArea='', lastPool='';
+  for(let i=header+1;i<rows.length;i++){
+    const r=rows[i]||[];
+    if(!r.some(v=>normCell(v))) continue;
+
+    let no=normCell(r[0]);
+    let areaKode=normCell(r[1]);
+    let namaArea=normCell(r[2]);
+    let pool=normCell(r[3]);
+    let leader=normCell(r[4]);
+    let hp=normCell(r[5]);
+
+    // Isi turun untuk sel yang kosong/merge.
+    if(areaKode) lastArea=areaKode; else areaKode=lastArea;
+    if(namaArea) lastNamaArea=namaArea; else namaArea=lastNamaArea;
+    if(pool) lastPool=pool; else pool=lastPool;
+
+    // Google Sheets kadang mengubah 0812... menjadi angka 812...
+    if(/^\d{9,14}$/.test(hp) && !hp.startsWith('0')) hp='0'+hp;
+
+    if(no.toUpperCase()==='TOTAL') continue;
+    if(!leader && !hp) continue;
+
+    out.push({NO:no,AREA_KODE:areaKode,NAMA_AREA:namaArea,NAMA_POOL:pool,NAMA_LEADER:leader,NOMER_HP:hp});
+  }
+  return out;
+}
 async function handleUpload(file){let status=$('uploadStatus');status.textContent='Membaca file '+file.name+'...';try{let XLSX=await loadXLSX(),buf=await file.arrayBuffer(),wb=XLSX.read(buf,{type:'array'});let needed=['MASTER WILAYAH','CHARGE TRANSPORT','KONTAK PIC'];let missing=needed.filter(s=>!wb.SheetNames.includes(s));if(missing.length)throw new Error('Sheet wajib tidak ditemukan: '+missing.join(', '));let data={master:rowsToMaster(XLSX.utils.sheet_to_json(wb.Sheets['MASTER WILAYAH'],{header:1,defval:''})),charge:rowsToCharge(XLSX.utils.sheet_to_json(wb.Sheets['CHARGE TRANSPORT'],{header:1,defval:''})),contacts:rowsToContacts(XLSX.utils.sheet_to_json(wb.Sheets['KONTAK PIC'],{header:1,defval:''}))};if(!data.master.length)throw new Error('MASTER WILAYAH kosong atau format tidak sesuai.');state.data=data;status.innerHTML='<b>Berhasil.</b> '+fmt(data.master.length)+' master wilayah • '+fmt(data.charge.length)+' charge transport • '+fmt(data.contacts.length)+' kontak PIC.';setupFilters();applyFilters()}catch(e){status.innerHTML='<b>Upload gagal:</b> '+esc(e.message)} }
 $('liveRefreshBtn').onclick=loadLiveData;
 $('exportBtn').onclick=exportCSV;
@@ -331,6 +442,27 @@ $('resetBtn').onclick=()=>{
   applyFilters();
 };
 $('applyBtn').onclick=function(e){if(e)e.preventDefault();applyFilters();};
+
+// Search Detail Charge Transport & Daftar Kontak PIC
+function setupTableSearch(){
+  const charge=$('chargeSearch');
+  const contact=$('contactSearch');
+  if(charge){
+    const run=()=>{state.chargeSearch=charge.value||'';state.chargePage=1;renderChargeTable();};
+    charge.addEventListener('input',run);
+    charge.addEventListener('change',run);
+    charge.addEventListener('search',run);
+    charge.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();run();charge.blur();}});
+  }
+  if(contact){
+    const run=()=>{state.contactSearch=contact.value||'';state.contactPage=1;renderContactTable();};
+    contact.addEventListener('input',run);
+    contact.addEventListener('change',run);
+    contact.addEventListener('search',run);
+    contact.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();run();contact.blur();}});
+  }
+}
+setupTableSearch();
 
 // iPhone/Safari-friendly search: respond to typing, Enter, and the Apply button.
 const searchBox=$('q');
@@ -348,9 +480,9 @@ if(searchBox){
   if(el){el.addEventListener('change',runSearch);el.addEventListener('input',runSearch);}
 });
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
-try{setupFilters();applyFilters();}catch(e){console.error('Initial render error',e)};loadLiveData();window.__liveTimer=setInterval(loadLiveData,LIVE_REFRESH_MS);
+try{setupFilters();applyFilters();}catch(e){console.error('Initial render error',e)};loadLiveData();window.__liveTimer=setInterval(function(){if(!document.hidden)loadLiveData()},LIVE_REFRESH_MS);
 document.addEventListener('visibilitychange',function(){
-  if(!document.hidden) loadLiveData();
+  if(!document.hidden && Date.now()-(window.__lastLiveFetch||0)>=LIVE_REFRESH_MS) loadLiveData();
 });
 
 window.addEventListener('error',function(e){
